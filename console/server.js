@@ -27,7 +27,7 @@ const owners = require('./lib/owners');
 const clients = require('./lib/clients');
 const model = require('./lib/model');
 
-const VERSION = '1.2.0-owner-filter';
+const VERSION = '1.3.0-open-queue';
 
 const PORT = process.env.PORT || 4000;
 const ACCESS_CODE = process.env.CONSOLE_ACCESS_CODE || '';
@@ -222,10 +222,12 @@ app.get('/api/dashboard', async function (req, res) {
   try {
     const data = await repo.dashboard();
 
-    // Strip anything identifying from the attention table when unauthenticated.
+    // Strip anything identifying from the attention tables when unauthenticated.
     if (!isAuthed(req)) {
-      data.stats.needsAttention = data.stats.needsAttention.map(function (r) {
-        return { id: r.id, age: r.age, station: r.station, owner: r.owner, status: r.status };
+      ['needsAttention', 'arriving', 'overdue'].forEach(function (key) {
+        data.stats[key] = (data.stats[key] || []).map(function (r) {
+          return { id: r.id, age: r.age, station: r.station, owner: r.owner, status: r.status };
+        });
       });
     }
 
