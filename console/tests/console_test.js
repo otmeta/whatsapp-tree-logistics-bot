@@ -209,6 +209,17 @@ check('dashboard KPIs and workload are computed correctly', () => {
   assert.strictEqual(aging['22+ days'], 1);
   assert.strictEqual(aging['8–21 days'], 1);
   assert.strictEqual(aging['4–7 days'], 1);
+  // Open charts ignore completed history. R3 is Completed and must not appear.
+  assert.deepStrictEqual(stats.openStatusMix.map((s) => s.name), ['To be contacted', 'In Progress']);
+  assert.strictEqual(stats.openStatusMix[0].count, 2);
+  assert.deepStrictEqual(stats.overdue.map((r) => r.id), ['R1']);
+  assert.deepStrictEqual(stats.arriving.map((r) => r.id), ['R4']);
+  assert.strictEqual(stats.kpis.newToday, 0);
+  const categories = {};
+  stats.openByCategory.forEach((c) => { categories[c.name] = c.count; });
+  assert.strictEqual(categories.Scanner, 1);
+  assert.strictEqual(categories.Uncategorised, 2);
+  assert.ok(!categories.Payroll, 'completed payroll is not open work');
 });
 
 check('avg days to resolve measures creation to completion, not age', () => {

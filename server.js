@@ -12,7 +12,7 @@ const messaging = require('./services/messaging');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
-const VERSION = '2.2.1-station-spacing-fix';
+const VERSION = '2.3.0-driver-commands';
 
 // Reject webhooks that Twilio did not sign. Off by default: the signed URL has
 // to be rebuilt exactly as Twilio saw it, and behind Railway's proxy a wrong
@@ -84,19 +84,80 @@ function verifyTwilioSignature(req) {
 }
 
 // Simple message handler - collects all info in one message
+const COMMANDS = `
+You can reply:
+• HELP — show this
+• CANCEL — stop, nothing is sent
+• START OVER — begin again`;
+
+function commandOf(message) {
+  const core = String(message || '')
+    .replace(/[^\p{L}\p{N}\s]/gu, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase();
+
+  if (/^(help|hilfe|info)$/.test(core)) return 'help';
+  if (/^(cancel|quit|stop|abbrechen)$/.test(core)) return 'cancel';
+  if (/^(start over|startover|restart|reset|von vorn|nochmal)$/.test(core)) return 'start_over';
+  return null;
+}
+
+function helpMessage(flowState) {
+  if (!flowState) {
+    return `🌳 Tree Logistics Office Support
+
+Tell us your first name, last name, and where you work.
+For example: John Smith DBE2   or   Maria Garcia Berlin
+${COMMANDS}`;
+  }
+
+  if (flowState.step === 'voi_city') {
+    return `We're waiting for the city you work in.
+
+For example: Berlin, Hamburg, Kiel
+${COMMANDS}`;
+  }
+
+  if (flowState.step === 'request_collection') {
+    return `We're waiting for what you need help with. The more detail you give, the faster the office can act.
+${COMMANDS}`;
+  }
+
+  return `We're waiting for your first name, last name, and where you work.
+For example: John Smith DBE2   or   Maria Garcia Berlin
+${COMMANDS}`;
+}
+
 async function handleMessage(body, from, profileName) {
   const message = body.trim();
   
   console.log(`📱 Received from ${from}: "${maskIban(message)}"`);
   
-  // Check for active conversation flow
   const flowState = conversationFlow.getFlowState(from);
+  const command = commandOf(message);
+
+  if (command === 'help') {
+    if (flowState) conversationFlow.updateFlow(from, {});
+    return helpMessage(flowState);
+  }
+
+  if (command === 'cancel') {
+    conversationFlow.clearFlow(from);
+    return `Okay, we've stopped. Nothing was sent to the office.
+
+Send a message whenever you want to start again.`;
+  }
+
+  if (command === 'start_over') {
+    conversationFlow.clearFlow(from);
+    return await startDataCollectionFlow(from, profileName, '');
+  }
 
   if (flowState) {
     return await handleActiveFlow(flowState, message, from, profileName);
   }
 
-  // Start the simple data collection flow
   return await startDataCollectionFlow(from, profileName, message);
 }
 
@@ -146,14 +207,16 @@ We have your message and it is safe — we just need to know who you are before 
 
 Please reply with your first name, last name, and where you work.
 
-For example: John Smith DBE2   or   Maria Garcia Berlin`;
+For example: John Smith DBE2   or   Maria Garcia Berlin
+${COMMANDS}`;
   }
 
   return `🌳 Welcome to Tree Logistics Office Support!
 
 We are glad that you reached out! To get started, please tell us your first name, last name, and where you work.
 
-📝 For example: John Smith DBE2   or   Maria Garcia Berlin`;
+📝 For example: John Smith DBE2   or   Maria Garcia Berlin
+${COMMANDS}`;
 }
 
 // Handle data collection - parse the single message for all 3 pieces of info

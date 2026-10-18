@@ -44,7 +44,9 @@
     error: null,
     gateError: null,
     saving: false,
-    pickingWho: false
+    pickingWho: false,
+    showPastOwners: false,
+    pendingRequestId: null
   };
 
   var root = document.getElementById('app');
@@ -274,7 +276,7 @@
 
   function topBar() {
     var openCount = state.requests.filter(function (r) { return isOpen(r.status); }).length;
-    var tabs = [['inbox', 'Inbox'], ['dashboard', 'Dashboard'], ['sheet', 'Sheet layout']];
+    var tabs = [['inbox', 'Inbox'], ['dashboard', 'Dashboard']];
 
     return '' +
       '<div class="topbar">' +
@@ -587,6 +589,35 @@
     }).join('');
   }
 
+  function attentionTable(rows, emptyText) {
+    var showText = rows.some(function (r) { return r.text != null; });
+    var cols = showText ? 5 : 4;
+    return '<table class="attention-table"><thead><tr>' +
+      '<th style="width:66px">Age</th><th style="width:110px">Station</th>' +
+      '<th>Owner</th><th style="width:148px">Status</th>' +
+      (showText ? '<th>Request</th>' : '') +
+      '</tr></thead><tbody>' +
+      (rows.length
+        ? rows.map(function (r) {
+          return '<tr data-goto="' + esc(r.id) + '">' +
+            '<td style="font-weight:700;color:' + ageColor(r.age) + '">' +
+              (r.age == null ? '—' : r.age + 'd') + '</td>' +
+            '<td>' + esc(r.station || '—') + '</td>' +
+            '<td class="' + (r.owner === 'Unassigned' ? 'owner-unassigned' : '') + '">' +
+              esc(r.owner) + '</td>' +
+            '<td>' + statusPill(r.status) + '</td>' +
+            (showText
+              ? '<td class="ellipsis">' + esc(String(r.text).replace(/\s*\n+\s*/g, ' ')) + '</td>'
+              : '') +
+          '</tr>';
+        }).join('')
+        : '<tr><td colspan="' + cols + '" class="caption" style="padding:14px 10px">' + esc(emptyText) + '</td></tr>') +
+      '</tbody></table>' +
+      (rows.length && !showText
+        ? '<span class="caption">Request text opens after the team code.</span>'
+        : '');
+  }
+
   function dashboardView() {
     if (!state.dashboard) {
       return '<div class="scroller"><div class="dash"><div class="detail-empty">Loading dashboard…</div></div></div>';
@@ -595,80 +626,140 @@
     var s = state.dashboard.stats;
     var k = s.kpis;
     var maxAge = Math.max.apply(null, s.aging.map(function (a) { return a.count; }).concat([1]));
-
-    var kpis = [
-      ['Total requests', k.total, 'since launch', '#121A14'],
-      ['Open', k.open, k.openPct + '% of all', '#8A5A00'],
-      ['Completed', k.completed, k.completedPct + '% completion', '#199948'],
-      ['Unassigned', k.unassigned, 'no owner set', '#B4291F'],
-      ['Open > 7 days', k.overSeven, 'breaching SLA', '#B4291F'],
-      ['Avg days to resolve', k.avgDays == null ? '—' : k.avgDays,
-        k.avgDays == null
-          ? 'needs Completed At dates'
-          : 'target 3.0 · from ' + k.avgDaysCoverage + ' of ' + k.completedCount + ' completed',
-        '#121A14']
-    ];
+    var coverageThin = !k.completedCount || (k.avgDaysCoverage / k.completedCount) < 0.5;
+    var visibleOwners = (s.byOwner || []).filter(function (o) {
+      return state.showPastOwners || o.open > 0;
+    });
+    var hiddenOwners = (s.byOwner || []).filter(function (o) { return o.open === 0; }).length;
+    var arriving = s.arriving || [];
+    var overdue = s.overdue || [];
 
     return '' +
       '<div class="scroller"><div class="dash">' +
-        '<div>' +
-          '<h1>Driver requests dashboard</h1>' +
-          '<div class="dash-sub">Tree Logistics GmbH · Last refreshed: ' +
-            esc(relativeWhen(state.dashboard.syncedAt)) + '</div>' +
+        '<div class="dash-head">' +
+          '<div>' +
+            '<h1>Open queue</h1>' +
+            '<div class="dash-sub">' + k.open + ' open now · ' + k.total +
+              ' since launch · refreshed ' + esc(relativeWhen(state.dashboard.syncedAt)) + '</div>' +
+          '</div>' +
         '</div>' +
 
         '<div class="kpis">' +
-          kpis.map(function (c) {
-            return '<div class="kpi">' +
-              '<div class="kpi-label">' + esc(c[0]) + '</div>' +
-              '<div class="kpi-value" style="color:' + c[3] + '">' + esc(c[1]) + '</div>' +
-              '<div class="kpi-note">' + esc(c[2]) + '</div>' +
-            '</div>';
-          }).join('') +
+          '<div class="kpi kpi-hero">' +
+            '<div class="kpi-label">Open</div>' +
+            '<div class="kpi-value" style="color:#8A5A00">' + k.open + '</div>' +
+            '<div class="kpi-note">' + k.openPct + '% of ' + k.total + '</div>' +
+          '</div>' +
+          '<div class="kpi">' +
+            '<div class="kpi-label">Unassigned</div>' +
+            '<div class="kpi-value" style="color:#B4291F">' + k.unassigned + '</div>' +
+            '<div class="kpi-note">nobody owns them yet</div>' +
+          '</div>' +
+          '<div class="kpi">' +
+            '<div class="kpi-label">New today</div>' +
+            '<div class="kpi-value">' + (k.newToday || 0) + '</div>' +
+            '<div class="kpi-note">arrived since midnight</div>' +
+          '</div>' +
+          '<div class="kpi">' +
+            '<div class="kpi-label">Open &gt; 7 days</div>' +
+            '<div class="kpi-value" style="color:#B4291F">' + k.overSeven + '</div>' +
+            '<div class="kpi-note">past the first SLA mark</div>' +
+          '</div>' +
+          '<div class="kpi">' +
+            '<div class="kpi-label">Completed</div>' +
+            '<div class="kpi-value" style="color:#199948">' + k.completed + '</div>' +
+            '<div class="kpi-note">' + k.completedPct + '% since launch</div>' +
+          '</div>' +
+          '<div class="kpi kpi-resolve">' +
+            '<div class="kpi-label">Avg days to resolve</div>' +
+            '<div class="kpi-split">' +
+              '<div>' +
+                '<div class="kpi-value">' + (k.avgDays == null ? '—' : k.avgDays) + '</div>' +
+                '<div class="kpi-note">target 3.0</div>' +
+              '</div>' +
+              '<div>' +
+                '<div class="kpi-value' + (coverageThin ? ' thin' : '') + '">' +
+                  k.avgDaysCoverage + '<span class="kpi-of">/' + k.completedCount + '</span></div>' +
+                '<div class="kpi-note">have a completion date</div>' +
+              '</div>' +
+            '</div>' +
+          '</div>' +
         '</div>' +
 
-        (s.byClient && s.byClient.length > 1
+        (s.byClient && s.byClient.length
           ? '<div class="cards-row">' +
             s.byClient.map(function (c) {
               return '<div class="client-card" style="border-left-color:' + c.color + '">' +
                 '<div class="client-name">' + esc(c.label) + '</div>' +
-                '<div class="client-figures">' +
-                  '<span><b>' + c.open + '</b> open</span>' +
-                  '<span><b>' + c.total + '</b> total</span>' +
-                  '<span' + (c.unassigned > 0 ? ' class="danger"' : '') + '><b>' + c.unassigned +
-                    '</b> unassigned</span>' +
-                '</div>' +
+                '<div class="client-open" style="color:' + c.color + '">' + c.open + '</div>' +
+                '<div class="kpi-note">open now · ' + c.total + ' since launch' +
+                  (c.unassigned ? ' · ' + c.unassigned + ' unassigned' : '') + '</div>' +
               '</div>';
             }).join('') +
             '</div>'
           : '') +
 
+        '<div class="attention-grid">' +
+          '<div class="card pad">' +
+            '<span class="card-label">New and unassigned</span>' +
+            '<span class="card-hint">no owner yet, or arrived in the last day, and under 21 days</span>' +
+            attentionTable(arriving, 'Nothing new is waiting. Every recent request has an owner.') +
+          '</div>' +
+          '<div class="card pad">' +
+            '<span class="card-label">Open longer than 21 days</span>' +
+            '<span class="card-hint">oldest first</span>' +
+            attentionTable(overdue, 'Nothing has been open longer than 21 days.') +
+          '</div>' +
+        '</div>' +
+
         '<div class="band">' +
           '<div class="card pad">' +
-            '<span class="card-label">Status mix</span>' +
-            '<div>' + barList(s.statusMix) + '</div>' +
-            '<span class="card-label" style="margin-top:6px">By station</span>' +
-            '<div>' + barList(s.byStation) + '</div>' +
+            '<span class="card-label">Open by status</span>' +
+            '<div>' + (s.openStatusMix && s.openStatusMix.length
+              ? barList(s.openStatusMix)
+              : '<div class="caption">No open requests.</div>') + '</div>' +
           '</div>' +
-
           '<div class="card pad">' +
-            '<span class="card-label">Open work by owner</span>' +
+            '<span class="card-label">Open by station</span>' +
+            '<div>' + (s.openByStation && s.openByStation.length
+              ? barList(s.openByStation)
+              : '<div class="caption">No open requests.</div>') + '</div>' +
+          '</div>' +
+          '<div class="card pad">' +
+            '<span class="card-label">Open by category</span>' +
+            '<div>' + (s.openByCategory && s.openByCategory.length
+              ? barList(s.openByCategory)
+              : '<div class="caption">No open requests.</div>') + '</div>' +
+          '</div>' +
+        '</div>' +
+
+        '<div class="band band-2">' +
+          '<div class="card pad">' +
+            '<div class="card-head-row">' +
+              '<span class="card-label">Who has open work</span>' +
+              (hiddenOwners
+                ? '<button class="btn-secondary" id="pastOwnersBtn">' +
+                  (state.showPastOwners ? 'Hide past owners' : 'Show ' + hiddenOwners + ' past owners') +
+                  '</button>'
+                : '') +
+            '</div>' +
             '<table class="mini"><thead><tr>' +
               '<th>Owner</th><th style="text-align:right">Open</th>' +
               '<th style="text-align:right">Total</th><th style="text-align:right">Done %</th>' +
             '</tr></thead><tbody>' +
-              s.byOwner.map(function (o) {
-                return '<tr>' +
-                  '<td class="' + (o.isUnassigned ? 'owner-unassigned' : '') + '">' + esc(o.owner) +
-                    (o.isLegacy ? ' <span class="legacy-flag">past</span>' : '') + '</td>' +
-                  '<td class="num ' + (o.open > 0 ? 'open-nonzero' : 'open-zero') + '">' + o.open + '</td>' +
-                  '<td class="num">' + o.total + '</td>' +
-                  '<td class="num">' + o.donePct + '%</td>' +
-                '</tr>';
-              }).join('') +
+              (visibleOwners.length
+                ? visibleOwners.map(function (o) {
+                  return '<tr>' +
+                    '<td class="' + (o.isUnassigned ? 'owner-unassigned' : '') + '">' + esc(o.owner) +
+                      (o.isLegacy ? ' <span class="legacy-flag">past</span>' : '') + '</td>' +
+                    '<td class="num ' + (o.open > 0 ? 'open-nonzero' : 'open-zero') + '">' + o.open + '</td>' +
+                    '<td class="num">' + o.total + '</td>' +
+                    '<td class="num">' + o.donePct + '%</td>' +
+                  '</tr>';
+                }).join('')
+                : '<tr><td colspan="4" class="caption">Nobody has an open request.</td></tr>') +
             '</tbody></table>' +
           '</div>' +
-
           '<div class="card pad">' +
             '<span class="card-label">Aging of open requests</span>' +
             '<div>' +
@@ -684,85 +775,6 @@
             '<span class="caption">Age is counted from the timestamp the bot wrote in column A.</span>' +
           '</div>' +
         '</div>' +
-
-        '<div class="card pad">' +
-          '<span class="card-label">Needs attention now</span>' +
-          '<span class="card-hint">unassigned, or open longer than 21 days</span>' +
-          '<table class="attention-table"><thead><tr>' +
-            '<th style="width:66px">Age</th><th style="width:74px">Station</th>' +
-            '<th style="width:96px">Owner</th><th style="width:128px">Status</th><th>Request</th>' +
-          '</tr></thead><tbody>' +
-            (s.needsAttention.length
-              ? s.needsAttention.map(function (r) {
-                return '<tr data-goto="' + esc(r.id) + '">' +
-                  '<td style="font-weight:700;color:' + ageColor(r.age) + '">' +
-                    (r.age == null ? '—' : r.age + 'd') + '</td>' +
-                  '<td>' + esc(r.station || '—') + '</td>' +
-                  '<td class="' + (r.owner === 'Unassigned' ? 'owner-unassigned' : '') + '">' +
-                    esc(r.owner) + '</td>' +
-                  '<td>' + statusPill(r.status) + '</td>' +
-                  '<td class="ellipsis">' + esc(r.text == null ? '— hidden —' :
-                    String(r.text).replace(/\s*\n+\s*/g, ' ')) + '</td>' +
-                '</tr>';
-              }).join('')
-              : '<tr><td colspan="5" class="caption" style="padding:14px 10px">' +
-                'Nothing needs attention. Every open request has an owner and is under 21 days old.</td></tr>') +
-          '</tbody></table>' +
-        '</div>' +
-      '</div></div>';
-  }
-
-  function sheetView() {
-    var tabs = [
-      ['01_Requests_RAW', 'Bot only · protected', '#199948',
-        'Columns A–H exactly as today. Appended by the bot, protected range, no sorting or deleting. Nobody types here.'],
-      ['02_Triage', 'Office workspace', '#F0A93C',
-        'Open requests mirrored from raw with office columns: Owner, Priority, Category, Contacted, Action, Notes.'],
-      ['03_Activity_Log', 'Append-only', '#3E7BD6',
-        'One row per action taken, stamped with request ID, person and time.'],
-      ['04_Dashboard', 'Formulas only', '#5A6A5F',
-        'KPIs, aging, workload and station split — all QUERY/COUNTIFS off the raw tab.']
-    ];
-
-    return '' +
-      '<div class="scroller"><div class="sheet-view">' +
-        '<div class="sheet-intro">' +
-          '<h1 style="margin:0;font-size:22px;letter-spacing:-0.02em">Sheet layout</h1>' +
-          '<p>The spreadsheet keeps working for people who prefer Sheets. The bot owns the raw tab and ' +
-          'appends to it; the office works in columns the bot never touches. This console writes to the ' +
-          'same columns, so both ways of working stay in sync.</p>' +
-        '</div>' +
-
-        '<div class="tab-cards">' +
-          tabs.map(function (t) {
-            return '<div class="tab-card" style="border-left-color:' + t[2] + '">' +
-              '<h4 class="mono">' + esc(t[0]) + '</h4>' +
-              '<span class="tag" style="color:' + t[2] + '">' + esc(t[1]) + '</span>' +
-              '<p>' + esc(t[3]) + '</p>' +
-            '</div>';
-          }).join('') +
-        '</div>' +
-
-        '<div class="summary-cards">' +
-          '<div class="summary-plain">' +
-            '<h4>What changes in the sheet</h4>' +
-            '<ul>' +
-              '<li>· The raw tab becomes a protected range — appended to, never typed in.</li>' +
-              '<li>· Office tracking moves into named columns the bot ignores.</li>' +
-              '<li>· Actions get their own append-only tab instead of being overwritten in a cell.</li>' +
-              '<li>· Dashboard numbers come from formulas, so they cannot drift from the data.</li>' +
-            '</ul>' +
-          '</div>' +
-          '<div class="summary-safe">' +
-            '<h4>Nothing is deleted or adjusted</h4>' +
-            '<ul>' +
-              '<li>✓ Every existing row stays exactly where it is.</li>' +
-              '<li>✓ Columns A–H keep the values the bot wrote.</li>' +
-              '<li>✓ Existing owner names are kept, including past team members.</li>' +
-              '<li>✓ New columns are added beside the old ones, never over them.</li>' +
-            '</ul>' +
-          '</div>' +
-        '</div>' +
       '</div></div>';
   }
 
@@ -772,6 +784,10 @@
         '<h1>Driver Requests Console</h1>' +
         '<p>This part shows unedited driver messages and can update the sheet, so it needs the ' +
         'team access code.</p>' +
+        (state.pendingRequestId
+          ? '<p class="gate-pending">After you sign in we will open <span class="mono">' +
+            esc(state.pendingRequestId) + '</span>.</p>'
+          : '') +
         (state.gateError ? '<div class="gate-error">' + esc(state.gateError) + '</div>' : '') +
         '<input id="code" type="password" placeholder="Team access code" autocomplete="current-password">' +
         '<button class="btn-primary" id="enterBtn" style="width:100%">Open console</button>' +
@@ -813,8 +829,10 @@
   function withScrollPreserved(paint) {
     var queue = root.querySelector('.queue-list');
     var detail = root.querySelector('.detail');
+    var scroller = root.querySelector('.scroller');
     var queueTop = queue ? queue.scrollTop : null;
     var detailTop = detail ? detail.scrollTop : null;
+    var scrollerTop = scroller ? scroller.scrollTop : null;
 
     paint();
 
@@ -825,6 +843,10 @@
     if (detailTop) {
       var newDetail = root.querySelector('.detail');
       if (newDetail) newDetail.scrollTop = detailTop;
+    }
+    if (scrollerTop) {
+      var newScroller = root.querySelector('.scroller');
+      if (newScroller) newScroller.scrollTop = scrollerTop;
     }
   }
 
@@ -841,10 +863,12 @@
     }
 
     // Anyone with the link can read the dashboard — it is aggregates only. The
-    // Inbox and Sheet layout still need the team code, so those land on the gate.
+    // Inbox still needs the team code, so it lands on the gate.
     if (!state.authed) {
       if (state.publicDashboard && state.view === 'dashboard') {
-        root.innerHTML = topBar() + dashboardView();
+        withScrollPreserved(function () {
+          root.innerHTML = topBar() + dashboardView();
+        });
         wire();
         return;
       }
@@ -863,7 +887,6 @@
 
     var body;
     if (state.view === 'dashboard') body = dashboardView();
-    else if (state.view === 'sheet') body = sheetView();
     else {
       body = '<div class="inbox' + (state.selectedId ? ' has-selection' : '') +
         (state.density === 'compact' ? ' compact' : '') + '">' +
@@ -1006,6 +1029,7 @@
     root.querySelectorAll('[data-goto]').forEach(function (el) {
       el.onclick = function () {
         state.selectedId = el.getAttribute('data-goto');
+        state.pendingRequestId = state.selectedId;
         state.draft = '';
         state.view = 'inbox';
         markRead(state.selectedId);
@@ -1013,6 +1037,12 @@
         render();
       };
     });
+
+    var pastOwnersBtn = document.getElementById('pastOwnersBtn');
+    if (pastOwnersBtn) pastOwnersBtn.onclick = function () {
+      state.showPastOwners = !state.showPastOwners;
+      render();
+    };
 
     root.querySelectorAll('select[data-field]').forEach(function (el) {
       el.onchange = function () {
@@ -1213,8 +1243,11 @@
         var changed = state.lastTotal == null || pulse.total !== state.lastTotal;
 
         if (state.view === 'dashboard') {
+          // Reloading the aggregates on every tick rebuilt the page and threw
+          // the reader back to the top. Only repaint when a request arrived.
           if (changed) return refresh().then(loadDashboard);
-          return loadDashboard();
+          updateSyncedLabel();
+          return;
         }
 
         // Never redraw the queue out from under someone mid-sentence.

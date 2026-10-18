@@ -206,6 +206,37 @@ function filterRequests(requests, opts) {
   });
 }
 
+function countMix(rows, nameOf, colorOf) {
+  const counts = {};
+  rows.forEach(function (r) {
+    const name = nameOf(r);
+    counts[name] = (counts[name] || 0) + 1;
+  });
+  const denom = rows.length || 1;
+  return Object.keys(counts)
+    .sort(function (a, b) { return counts[b] - counts[a]; })
+    .map(function (name) {
+      return {
+        name: name,
+        count: counts[name],
+        pct: Math.round((counts[name] / denom) * 1000) / 10,
+        color: colorOf(name)
+      };
+    });
+}
+
+function attentionRow(r) {
+  return {
+    id: r.id,
+    age: r.age,
+    station: r.station,
+    owner: r.owner,
+    status: r.status,
+    text: r.text,
+    category: r.category || ''
+  };
+}
+
 /** Everything the dashboard renders, computed in one pass over the requests. */
 function dashboardStats(requests) {
   const total = requests.length;
@@ -326,6 +357,44 @@ function dashboardStats(requests) {
     .filter(function (r) { return r.owner === owners.UNASSIGNED || (r.age != null && r.age > 21); })
     .sort(function (a, b) { return (b.age || 0) - (a.age || 0); });
 
+  // Old breaches stay in their own list. New and unassigned work would otherwise
+  // sort underneath a 60-day row and never get seen.
+  const overdue = open
+    .filter(function (r) { return r.age != null && r.age > 21; })
+    .sort(function (a, b) { return (b.age || 0) - (a.age || 0); })
+    .map(attentionRow);
+  const arriving = open
+    .filter(function (r) {
+      if (r.age != null && r.age > 21) return false;
+      return r.owner === owners.UNASSIGNED || r.age === 0 || r.age === 1;
+    })
+    .sort(function (a, b) { return (a.age == null ? 0 : a.age) - (b.age == null ? 0 : b.age); })
+    .map(attentionRow);
+
+  const openStatusMix = countMix(open, function (r) { return r.status || '(blank)'; }, function (name) {
+    return statusColors(name).bar;
+  });
+  const openByStation = countMix(open, function (r) { return r.station || '(none)'; }, function (name) {
+    const config = clients.configOf(clients.clientOf(name));
+    return config ? config.color : '#9AA79E';
+  });
+  const CATEGORY_COLORS = {
+    Payroll: '#199948',
+    Documents: '#3E7BD6',
+    Equipment: '#7A5AF8',
+    Scanner: '#0E8A8A',
+    Vacation: '#C45C26',
+    'Bank details': '#8A5A00',
+    Contract: '#3D6B4F',
+    Recruiting: '#5B4B8A',
+    Vehicle: '#1F6B4A'
+  };
+  const openByCategory = countMix(open, function (r) {
+    return r.category ? r.category : 'Uncategorised';
+  }, function (name) {
+    return CATEGORY_COLORS[name] || '#9AA79E';
+  });
+
   return {
     kpis: {
       total: total,
@@ -335,16 +404,22 @@ function dashboardStats(requests) {
       completedPct: pct(completed.length),
       unassigned: unassigned,
       overSeven: overSeven,
+      newToday: open.filter(function (r) { return r.age === 0; }).length,
       avgDays: avgDays,
       avgDaysCoverage: resolveTimes.length,
       completedCount: completed.length
     },
     statusMix: statusMix,
     byStation: byStation,
+    openStatusMix: openStatusMix,
+    openByStation: openByStation,
+    openByCategory: openByCategory,
     byClient: byClient,
     byOwner: byOwner,
     aging: aging,
-    needsAttention: needsAttention
+    needsAttention: needsAttention.map(attentionRow),
+    arriving: arriving,
+    overdue: overdue
   };
 }
 

@@ -25,7 +25,7 @@ const { Repository } = require('./lib/repository');
 const HEADER = [
   'Timestamp', 'First Name', 'Last Name', 'Station', 'Request/Question',
   'Request ID', 'Phone Number', 'Status', 'Owner', 'Priority', 'DA Contacted',
-  'Out or still with us', 'Action', 'Notes', 'Completed At'
+  'Out or still with us', 'Action', 'Notes', 'Category', 'Completed At'
 ];
 
 function daysAgo(n) {
@@ -45,8 +45,8 @@ const ROWS = [
   [daysAgo(31), 'Samir', 'Osmani', 'DBE3', 'I need my Lohnabrechnung for last month, it never arrived', 'REQ-2007', 'whatsapp:+4917600000103', 'Not started', '', '', '', '', '', ''],
   [daysAgo(40), 'Petra', 'Novak', 'DBE2', 'Scanner has GPS problems, it keeps losing the signal on my route', 'REQ-2008', 'whatsapp:+4917600000108', 'To be contacted', 'Pedro Trabbold', 'Urgent', 'WhatsApp', '', '', ''],
   [daysAgo(3), 'Elena', 'Petrova', 'DBE3', 'Please confirm my contract end date for my landlord', 'REQ-2009', 'whatsapp:+4917600000109', 'Completed', 'Amnery', '', '', '', '', '', daysAgo(1)],
-  [daysAgo(12), 'Tomas', 'Weber', 'DBE2', 'I lost my work phone charger, can I get a replacement?', 'REQ-2010', 'whatsapp:+4917600000110', 'Completed', 'Hugo', '', '', '', '', '', daysAgo(9)],
-  [daysAgo(20), 'Ana', 'Silva', 'DBE3', 'Question about my payslip amount this month, it looks lower than usual', 'REQ-2011', 'whatsapp:+4917600000111', 'Completed', 'Fadi', '', '', '', '', '', daysAgo(16)],
+  [daysAgo(12), 'Tomas', 'Weber', 'DBE2', 'I lost my work phone charger, can I get a replacement?', 'REQ-2010', 'whatsapp:+4917600000110', 'Completed', 'Hugo', '', '', '', '', '', ''],
+  [daysAgo(20), 'Ana', 'Silva', 'DBE3', 'Question about my payslip amount this month, it looks lower than usual', 'REQ-2011', 'whatsapp:+4917600000111', 'Completed', 'Fadi', '', '', '', '', '', ''],
   [daysAgo(8), 'Ibrahim', 'Kone', 'DBE2', 'Need a confirmation letter for my visa appointment next week', 'REQ-2012', 'whatsapp:+4917600000102', 'To be contacted', '', '', '', '', '', ''],
 
   // VOI — the station cell carries the city, and these default to Anderson.
@@ -54,8 +54,21 @@ const ROWS = [
   [daysAgo(6), 'Jonas', 'Lindqvist', 'VOI Hamburg', 'I want to change my IBAN, I opened a new bank account', 'REQ-2014', 'whatsapp:+4917600000202', 'To be contacted', 'Anderson Meta', 'Normal', '', '', '', ''],
   [daysAgo(17), 'Aisha', 'Diallo', 'VOI Berlin', 'Can I request vacation from 01.10.2026 to 08.10.2026?', 'REQ-2015', 'whatsapp:+4917600000203', 'needs to be clarified', '', '', '', '', '', ''],
   [daysAgo(4), 'Tomasz', 'Nowak', 'VOI Kiel', 'I need new work clothes in size L please', 'REQ-2016', 'whatsapp:+4917600000204', 'To be contacted', '', '', '', '', '', ''],
-  [daysAgo(23), 'Sofia', 'Ruiz', 'VOI Rostock', 'Question about my contract end date for my landlord', 'REQ-2017', 'whatsapp:+4917600000205', 'Completed', 'Anderson Meta', '', '', '', '', '', daysAgo(21)]
+  [daysAgo(23), 'Sofia', 'Ruiz', 'VOI Rostock', 'Question about my contract end date for my landlord', 'REQ-2017', 'whatsapp:+4917600000205', 'Completed', 'Anderson Meta', '', '', '', '', '', '']
 ];
+
+const DEMO_CATEGORIES = [
+  'Documents', 'Scanner', 'Bank details', 'Documents', 'Vacation', 'Equipment',
+  'Payroll', 'Scanner', 'Contract', 'Equipment', 'Payroll', 'Documents',
+  'Payroll', 'Bank details', 'Vacation', 'Equipment', 'Contract'
+];
+// Open rows stop at Notes (14 cells). Completed rows already include Completed At
+// (15 cells). Pad, then insert Category in front of Completed At so it lands on
+// the header — splicing before "whatever is last" put the label in Notes.
+ROWS.forEach(function (row, i) {
+  if (row.length === 14) row.push('');
+  row.splice(14, 0, DEMO_CATEGORIES[i] || '');
+});
 
 const fake = new FakeSheets({
   'Driver Requests': [HEADER].concat(ROWS),
