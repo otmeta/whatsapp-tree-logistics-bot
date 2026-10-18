@@ -1,0 +1,15 @@
+{
+  "name": "Tree Logistics WhatsApp bot",
+  "install": "npm ci\nnpm ci --prefix console",
+  "start": "bash .cursor/start.sh",
+  "ports": [
+    {
+      "name": "WhatsApp bot",
+      "port": 3000
+    },
+    {
+      "name": "Driver requests console",
+      "port": 4100
+    }
+  ]
+}
