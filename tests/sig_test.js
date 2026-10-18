@@ -9,6 +9,7 @@
 const path = require('path');
 
 const PROJECT = process.env.PROJECT || path.join(__dirname, '..');
+process.env.FLOW_STORE = 'memory';
 
 const AUTH_TOKEN = 'a'.repeat(32);
 const PUBLIC_HOST = 'whatsapp-tree-logistics-bot-production.up.railway.app';

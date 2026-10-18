@@ -11,6 +11,9 @@ const path = require('path');
 
 const PROJECT = process.env.PROJECT || path.join(__dirname, '..');
 
+// The bot persists half-finished conversations. Tests must not write that file.
+process.env.FLOW_STORE = 'memory';
+
 // Keep the real .env out of it — the stub means no credentials are needed.
 process.env.PORT = process.env.TEST_PORT || '38217';
 process.env.GOOGLE_SHEET_ID = 'STUB-SHEET';
@@ -574,6 +577,36 @@ async function main() {
     await send(p, 'I need login details for the portal please');
     const row = saved.find((s) => s.phoneNumber === p);
     check('S26 stored as Amazon', row && row.station === 'DBE2', row ? row.station : 'not saved');
+  }
+
+  // === Scenario 27: HELP, CANCEL and START OVER work at any step ===
+  {
+    const p = nextPhone();
+    const helpFirst = await send(p, 'HELP');
+    check('S27 HELP before a conversation explains how to start',
+      /first name/i.test(helpFirst.text) && /CANCEL/i.test(helpFirst.text) && /START OVER/i.test(helpFirst.text),
+      helpFirst.text);
+
+    await send(p, 'Hi');
+    await send(p, 'Maria Garcia DBE2');
+    const helpMid = await send(p, 'hilfe!');
+    check('S27 HELP during the request step does not file the word help',
+      /what you need help with/i.test(helpMid.text) && !/submitted successfully/i.test(helpMid.text),
+      helpMid.text);
+
+    const cancelled = await send(p, 'CANCEL');
+    check('S27 CANCEL stops without sending anything',
+      /nothing was sent/i.test(cancelled.text), cancelled.text);
+
+    const afterCancel = await send(p, 'I need a new scanner because mine stopped working');
+    check('S27 a request after CANCEL is held, not filed under the old name',
+      /who you are/i.test(afterCancel.text) && !/submitted successfully/i.test(afterCancel.text),
+      afterCancel.text);
+
+    const restarted = await send(p, 'START OVER');
+    check('S27 START OVER begins again at the welcome',
+      REPLY.welcome.test(restarted.text) && /John Smith DBE2/.test(restarted.text),
+      restarted.text);
   }
 
   // ---- summary ----
